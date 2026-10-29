@@ -1,0 +1,29 @@
+# نظام
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# محرر
+.vscode/
+.idea/
+*.swp
+
+# أسرار — لا تُرفع أبدًا
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# مخرجات توليد/كاش
+__pycache__/
+*.pyc
+.cache/
+dist/
+build/
+node_modules/
+
+# ملفات مؤقتة
+~$*
+*.tmp
+*.log
