@@ -65,16 +65,19 @@ except ImportError:
 PRESETS = {
     # الافتراضي: أفضل توازن جودة/حجم لحراج
     "haraj": dict(max_side=2048, min_side=1000, quality=92, min_quality=82,
-                  max_kb=2048, sharpen=1.0, subsampling=0, progressive=True),
+                  max_kb=2048, sharpen=0.35, subsampling=0, progressive=True),
     # أقصى جودة: للصور التي تحمل تفاصيل مهمة (ملمس بلاط، أنماط، نقوش)
     "max":   dict(max_side=2560, min_side=1200, quality=95, min_quality=88,
-                  max_kb=4096, sharpen=1.15, subsampling=0, progressive=True),
+                  max_kb=4096, sharpen=0.50, subsampling=0, progressive=True),
     # متوازن: حجم أصغر مع جودة ممتازة
     "balanced": dict(max_side=1800, min_side=900, quality=90, min_quality=80,
-                     max_kb=1024, sharpen=0.95, subsampling=0, progressive=True),
+                     max_kb=1024, sharpen=0.30, subsampling=0, progressive=True),
     # خفيف: لمن عنده صور كثيرة أو اتصال بطيء
     "lite":  dict(max_side=1400, min_side=800, quality=86, min_quality=76,
-                  max_kb=512, sharpen=0.85, subsampling=0, progressive=True),
+                  max_kb=512, sharpen=0.25, subsampling=0, progressive=True),
+    # آمن: بلا أي حدّة — أعلى أمانة ممكنة للأصل (الأفضل للصور ذات النقوش الدقيقة)
+    "safe":  dict(max_side=2048, min_side=1000, quality=94, min_quality=85,
+                  max_kb=3072, sharpen=0.0, subsampling=0, progressive=True),
 }
 
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
@@ -186,6 +189,17 @@ def resize_smart(img: Image.Image, max_side: int, min_side: int,
     new_size = (max(1, round(w * factor)), max(1, round(h * factor)))
     # LANCZOS = أفضل مرشّح للتصغير (يحفظ التفاصيل والحدّة)
     return img.resize(new_size, Image.LANCZOS), factor
+
+
+def apply_sharpen(img: Image.Image, amount: float) -> Image.Image:
+    """تطبيق UnsharpMask بمقدار محدد (0 = بلا تغيير)."""
+    if amount <= 0:
+        return img
+    radius = 1.0 if img.size[0] >= 1200 else 0.8
+    threshold = 2 if img.size[0] >= 1200 else 3
+    return img.filter(ImageFilter.UnsharpMask(radius=radius,
+                                              percent=int(amount * 100),
+                                              threshold=threshold))
 
 
 def adaptive_sharpen(img: Image.Image, base: float, factor: float) -> tuple[Image.Image, float]:
@@ -310,12 +324,29 @@ def process_one(src: Path, out_dir: Path | None, preset: dict, args) -> Report:
         rep.note = "؛ ".join(warns)
 
     # 1) القياسات قبل الترميز (على الصورة بعد التصغير والحدّة)
-    resized, factor = resize_smart(img, preset["max_side"], preset["min_side"],
+    max_side = args.target_side if getattr(args, "target_side", None) else preset["max_side"]
+    resized, factor = resize_smart(img, max_side, preset["min_side"],
                                    args.allow_upscale)
     rep.scale = factor
     rep.sharpness_before = sharpness_score(resized)
 
     sharpened, amount = adaptive_sharpen(resized, preset["sharpen"], factor)
+
+    # 🛡️ حارس الجودة: الحدّة التي تُبعد الصورة عن أصلها أكثر من اللازم تُقلَّل تلقائيًا.
+    # السبب (مُثبت بالتجربة): الحدّة الزائدة تُنتج هالات وضجيجًا يعظّمه ضغط حراج.
+    guard_used = False
+    if amount > 0 and args.quality_guard:
+        limit = args.guard_psnr
+        for _ in range(6):
+            if psnr(resized, sharpened) >= limit:
+                break
+            amount *= 0.65
+            sharpened = apply_sharpen(resized, amount)
+            guard_used = True
+        if guard_used:
+            rep.note = ((rep.note + "؛ ") if rep.note else "") + \
+                f"حارس الجودة خفّض الحدّة إلى {amount:.2f} (حفاظًا على التفاصيل)"
+
     rep.sharpen = round(amount, 2)
     rep.sharpness_after = sharpness_score(sharpened)
 
@@ -489,6 +520,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-shrink-for-size", action="store_true",
                    help="منع التصغير الإضافي عند تجاوز الحجم")
     p.add_argument("--strip-icc", action="store_true", help="إزالة ملف الألوان من الملف الناتج")
+    p.add_argument("--quality-guard", dest="quality_guard", action="store_true", default=True,
+                   help="حارس الجودة: يقلّل الحدّة تلقائيًا إن أضرّت بالتفاصيل (افتراضي: مفعّل)")
+    p.add_argument("--no-quality-guard", dest="quality_guard", action="store_false",
+                   help="إيقاف حارس الجودة")
+    p.add_argument("--guard-psnr", type=float, default=41.0,
+                   help="عتبة أمانة الحدّة بالـ PSNR مقابل الصورة غير الحادة (افتراضي 41 dB)")
+    p.add_argument("--target-side", type=int, default=None,
+                   help="تصغير مسبق إلى هذا الضلع لنتحكّم نحن بإعادة العيّنات بدل المنصة (مثال: 1080)")
     p.add_argument("--recursive", action="store_true", default=True, help="البحث في المجلدات الفرعية")
     p.add_argument("--no-recursive", dest="recursive", action="store_false")
     p.add_argument("--suffix", default="_haraj", help="لاحقة الملفات الناتجة")
@@ -535,7 +574,10 @@ def main(argv: list[str] | None = None) -> int:
           f"{preset['quality']}→{preset['min_quality']} • حدّة {preset['sharpen']})")
     print(f"  اللون      : sRGB  |  العيّنات: 4:4:4 (بلا تقليل)  |  "
           f"{'Progressive' if preset['progressive'] else 'Baseline'}")
-    print(f"  الحجم      : حد {args.max_kb if args.max_kb is not None else preset['max_kb']} KB")
+    print(f"  الحجم      : حد {args.max_kb if args.max_kb is not None else preset['max_kb']} KB"
+          + (f"  |  مقاس مستهدف {args.target_side}px" if args.target_side else ""))
+    print(f"  حارس الجودة: {'مفعّل' if args.quality_guard else 'متوقف'}"
+          f" (عتبة {args.guard_psnr:.0f} dB)")
     print(f"  العلامة    : {'نعم — ' + args.footer_palette if args.footer else 'لا'}")
     print(f"  الصور      : {len(files)}" + ("   ⚠️ وضع التجربة (بلا حفظ)" if args.dry_run else ""))
     if np is None:
