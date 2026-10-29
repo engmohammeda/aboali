@@ -8,15 +8,24 @@ FDIR = f"{BASE}/fonts"
 OUT  = f"{BASE}/out"
 os.makedirs(OUT, exist_ok=True)
 
-# ---------- الألوان ----------
-TERRA   = (180, 85, 45)
-TERRA_D = (140, 62, 32)
-NAVY    = (31, 78, 121)
-NAVY_D  = (18, 47, 76)
-SAND    = (239, 231, 218)
-SAND_L  = (248, 244, 238)
-CHAR    = (43, 43, 43)
-GOLD    = (201, 162, 39)
+# ---------- الألوان: هوية «أبو عمر للسيراميك والبورسلان» (أسود أونيكس + ذهبي) ----------
+ONYX    = (11, 9, 6)      # #0B0906
+ONYX_D  = (6, 5, 3)
+GOLD_HI = (251, 235, 199) # #FBEBC7
+GOLD    = (234, 206, 165) # #EACEA5
+GOLD_MD = (201, 170, 131) # #C9AA83
+GOLD_DP = (184, 134, 80)  # #B88650
+BRONZE  = (92, 72, 47)    # #5C482F
+IVORY   = (246, 240, 230)
+
+# أسماء متوافقة مع بقية السكربت
+TERRA   = GOLD_DP
+TERRA_D = BRONZE
+NAVY    = ONYX
+NAVY_D  = ONYX_D
+SAND    = IVORY
+SAND_L  = GOLD_HI
+CHAR    = ONYX
 WHITE   = (255, 255, 255)
 
 def F(name, size):
